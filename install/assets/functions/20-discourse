@@ -496,6 +496,89 @@ configure_plugins() {
         fi
     fi
 
+    # Discourse AI
+    if var_true "${PLUGIN_ENABLE_DISCOURSE_AI}" ; then
+        plugin_installed=true
+        if [ ! -d "/app/plugins/discourse-ai" ] ; then
+            print_notice "Enabling Plugin: Discourse-AI"
+            
+            # 檢查源目錄
+            if [ ! -d "/data/plugins/discourse-ai" ]; then
+                print_warn "Source directory /data/plugins/discourse-ai not found"
+                return
+            fi
+            
+            # 複製插件
+            cp -R /data/plugins/discourse-ai /app/plugins/
+            
+            # 設置權限
+            chown -R discourse:discourse /app/plugins/discourse-ai
+            chmod -R 755 /app/plugins/discourse-ai
+            
+            # 檢查並安裝必要的依賴
+            if [ -f "/app/plugins/discourse-ai/plugin.rb" ]; then
+                print_debug "Checking plugin dependencies"
+                
+                # 設置 gem 環境變數
+                export GEM_HOME="/app/vendor/bundle/ruby/3.3.0"
+                export GEM_PATH="/app/vendor/bundle/ruby/3.3.0"
+                export BUNDLE_PATH="/app/vendor/bundle"
+                export GEM_CACHE="/app/vendor/bundle/ruby/3.3.0/cache"
+                export HOME="/app"
+                
+                # 創建必要的目錄並設置權限
+                mkdir -p "${GEM_CACHE}"
+                chown -R discourse:discourse "${GEM_CACHE}"
+                chmod -R 755 "${GEM_CACHE}"
+                
+                # 確保 vendor/bundle 目錄存在並有正確權限
+                mkdir -p /app/vendor/bundle
+                chown -R discourse:discourse /app/vendor/bundle
+                chmod -R 755 /app/vendor/bundle
+                
+                # 安裝其他依賴
+                cd /app/plugins/discourse-ai
+                
+                # 使用 discourse 用戶執行所有操作
+                sudo -u discourse bash -c '
+                    export GEM_HOME="/app/vendor/bundle/ruby/3.3.0"
+                    export GEM_PATH="/app/vendor/bundle/ruby/3.3.0"
+                    export BUNDLE_PATH="/app/vendor/bundle"
+                    export GEM_CACHE="/app/vendor/bundle/ruby/3.3.0/cache"
+                    export HOME="/app"
+                    bundle config set path "/app/vendor/bundle"
+                    bundle config set without "development test"
+                    bundle install
+                '
+                
+                # 安裝後再次檢查權限
+                find /app/vendor/bundle -type d -exec chown discourse:discourse {} \;
+                find /app/vendor/bundle -type f -exec chown discourse:discourse {} \;
+                find /app/vendor/bundle -type d -exec chmod 755 {} \;
+                find /app/vendor/bundle -type f -exec chmod 644 {} \;
+                
+                # 特別處理可執行文件
+                find /app/vendor/bundle -type f -name "*.rb" -exec chmod 755 {} \;
+                find /app/vendor/bundle -type f -name "*.sh" -exec chmod 755 {} \;
+            fi
+        else
+            print_debug "Plugin already exists: discourse-ai"
+            # 檢查現有文件的權限
+            find /app/plugins/discourse-ai -type d -exec chown discourse:discourse {} \;
+            find /app/plugins/discourse-ai -type f -exec chown discourse:discourse {} \;
+            find /app/plugins/discourse-ai -type d -exec chmod 755 {} \;
+            find /app/plugins/discourse-ai -type f -exec chmod 644 {} \;
+        fi
+        
+        # 最終權限檢查
+        chown -R discourse:discourse /app/plugins/discourse-ai
+        chown -R discourse:discourse /app/vendor/bundle
+        find /app/plugins/discourse-ai -type d -exec chmod 755 {} \;
+        find /app/plugins/discourse-ai -type f -exec chmod 644 {} \;
+        find /app/vendor/bundle -type d -exec chmod 755 {} \;
+        find /app/vendor/bundle -type f -exec chmod 644 {} \;
+    fi
+
     chown -R discourse:discourse /app/plugins
 }
 
@@ -551,3 +634,131 @@ EOF
 setup_shell() {
     echo "alias rake=\"cd /app; sudo -Eu discourse bin/rake\"" >> /root/.bashrc
 }
+
+
+configure_git_safe_directory() {
+    print_info "===================================== Configuring git safe directory..."
+    git config --global --add safe.directory /app
+    print_debug "===================================== Git safe directory configured: /app"
+    # result=$(git config --global --get safe.directory)
+    # print_info "===================================== Git safe directory configured: ${result}"
+}
+
+configure_notification_email() {
+    print_info "===================================== Configuring notification email..."
+    output=$(console_exec <<EOF
+    begin
+        puts "Current notification email (Default): #{SiteSetting.notification_email}"
+        SiteSetting.notification_email = ENV["NOTIFICATION_EMAIL"]
+        puts "Notification email successfully set to: #{SiteSetting.notification_email}"
+    rescue => e
+        puts "Error: #{e.message}"
+    end
+EOF
+    )
+    print_info "===================================== ${output}"
+}
+
+install_themes() {
+    print_info "===================================== Installing themes..."
+    if [ -f "/app/config/theme.yml" ]; then
+        cd /app
+        silent bundle exec rake themes:install < /app/config/theme.yml
+        print_debug "Themes installed from theme.yml successfully"
+    else
+        print_warn "theme.yml not found in /app/config/"
+    fi
+}
+
+configure_theme_permissions_and_settings() {
+    print_info "Configuring theme permissions and settings..."
+    
+    # Set required permissions
+    chmod -R a+w /app/tmp/stylesheet-cache
+    chmod -R a+w /app/public/uploads/default/original
+    print_debug "Set Theme permissions successfully"
+    
+    # Configure theme settings
+    console_exec <<EOF
+    begin
+        # Check current theme
+        puts "Checking current theme settings..."
+        default_theme_id = SiteSetting.default_theme_id
+        current_theme = Theme.find_by(id: default_theme_id)
+        puts "Initial theme: #{current_theme&.name} (ID: #{default_theme_id})"
+        
+        # Set new theme
+        theme = Theme.find_by(name: "${THEME_NAME}")
+        if theme
+            SiteSetting.default_theme_id = theme.id
+            puts "Theme set successfully to: #{theme.name} (ID: #{theme.id})"
+            
+            # Verify the change
+            default_theme_id = SiteSetting.default_theme_id
+            current_theme = Theme.find_by(id: default_theme_id)
+            puts "Verified current theme: #{current_theme&.name} (ID: #{default_theme_id})"
+        else
+            puts "Warning: Theme '${THEME_NAME}' not found"
+        end
+    rescue => e
+        puts "Error configuring theme: #{e.message}"
+    end
+EOF
+}
+
+# configure_test_plugins() {
+#     print_info "===================================== Configuring test plugins..."
+    
+#     # Check if the plugins directory exists
+#     if [ ! -d "/data/plugins" ]; then
+#         print_warn "Plugin directory not found: /data/plugins"
+#         return
+#     fi
+
+#     # Check if the JSON file exists
+#     if [ ! -f "/data/plugins/plugins.json" ]; then
+#         print_warn "plugins.json not found in /data/plugins/"
+#         return
+#     fi
+
+#     # Read the JSON file
+#     local plugins_json=$(cat /data/plugins/plugins.json)
+    
+#     # Use jq to parse the JSON and get the enabled plugins
+#     local enabled_plugins=$(echo "$plugins_json" | jq -r '.plugins[] | select(.enabled) | .name')
+    
+#     if [ -z "$enabled_plugins" ]; then
+#         print_warn "No enabled plugins found in plugins.json"
+#         return
+#     fi
+
+#     # Process each enabled plugin
+#     for plugin in $enabled_plugins; do
+#         # Check if the plugin directory exists in /data/plugins
+#         if [ ! -d "/data/plugins/$plugin" ]; then
+#             print_warn "Plugin directory not found: /data/plugins/$plugin"
+#             continue
+#         fi
+
+#         # Check if the plugin is already in /app/plugins
+#         if [ ! -d "/app/plugins/$plugin" ]; then
+#             print_notice "Enabling Plugin: $plugin"
+#             cp -R "/data/plugins/$plugin" "/app/plugins/$plugin"
+            
+#             # Install plugin dependencies if needed
+#             if [ -f "/app/plugins/$plugin/plugin.rb" ]; then
+#                 print_info "Installing dependencies for $plugin..."
+#                 cd "/app/plugins/$plugin"
+#                 bundle install --path gems/3.3.7 || {
+#                     print_warn "Failed to install dependencies for $plugin, continuing..."
+#                 }
+#             fi
+#         else
+#             print_debug "Plugin already exists: $plugin"
+#         fi
+#     done
+
+#     # Set the plugin directory permissions
+#     chown -R discourse:discourse /app/plugins
+#     print_info "===================================== Test plugins configuration completed"
+# }

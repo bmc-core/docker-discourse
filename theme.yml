@@ -1,0 +1,4 @@
+Test V2 Theme:
+  url: https://github.com/bmc-core/discourse-theme.git
+  branch: main
+  add_to_all_themes: true

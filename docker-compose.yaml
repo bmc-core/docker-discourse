@@ -1,0 +1,130 @@
+services:
+  discourse-app:
+    container_name: discourse-app
+    image: tiredofit/discourse:latest
+    # labels:
+    #   - traefik.enable=true
+    #   - traefik.http.routers.discourse.rule=Host(`${SITE_HOSTNAME}`)
+    #   - traefik.http.services.discourse.loadbalancer.server.port=3000
+    # command: >
+    #   /bin/sh -c "git config --global --add safe.directory /app && /init"
+    volumes:
+      - ./logs:/data/logs
+      - ./data/uploads:/data/uploads
+      - ./data/backups:/data/backups
+      - ./plugins:/data/plugins
+      - ./theme.yml:/app/config/theme.yml
+      - ./install/assets/functions/20-discourse:/assets/functions/20-discourse
+      - ./install/etc/cont-init.d/20-discourse:/etc/cont-init.d/20-discourse
+      # - ./plugins/discourse-ai:/app/plugins/discourse-ai
+      # - ./discourse.conf:/app/config/discourse.conf
+
+    environment:
+      # Postgres
+      - DB_HOST=discourse-db
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+
+      # Redis
+      - REDIS_HOST=discourse-redis
+
+      # Discourse Admin
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_NAME=${ADMIN_NAME}
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASS=${ADMIN_PASS}
+
+      # Discourse Web
+      - TIMEZONE=${TIMEZONE}
+      - SITE_HOSTNAME=${SITE_HOSTNAME}
+      - DEVELOPER_EMAILS=${ADMIN_EMAIL}
+      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL}
+      - THEME_NAME=${THEME_NAME}
+
+      # Discourse SMTP
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_AUTHENTICATION=none
+      - SMTP_DOMAIN=jabil.com
+
+      # Discourse Plugins
+      - PLUGIN_ENABLE_DISCOURSE_AI=TRUE
+
+      # Debug
+      - DEBUG_MODE=TRUE
+      - UNICORN_SIDEKIQS=2
+      # - SIDEKIQ_THREADS=10
+    restart: always
+    ports:
+      - "80:3000"
+    depends_on:
+      discourse-db:
+        condition: service_healthy
+      discourse-redis:
+        condition: service_healthy
+    networks:
+      # - proxy
+      - services
+
+  discourse-db:
+    container_name: discourse-db
+    image: tiredofit/postgres:17
+    restart: always
+    volumes:
+      - ./db:/var/lib/postgresql/data
+    environment:
+      - TIMEZONE=${TIMEZONE}
+      - CONTAINER_NAME=discourse-db
+      - SUPERUSER_PASS=${DB_PASS}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - services
+
+  discourse-redis:
+    image: tiredofit/redis:7
+    container_name: discourse-redis
+    volumes:
+      - ./redis:/var/lib/redis
+    environment:
+      - TIMEZONE=${TIMEZONE}
+      - CONTAINER_NAME=discourse-redis
+    healthcheck:
+      test: [ "CMD-SHELL", "redis-cli ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - services
+    restart: always
+
+  discourse-db-backup:
+    image: tiredofit/db-backup
+    container_name: discourse-db-backup
+    volumes:
+      - ./dbbackup:/backup
+    environment:
+      - TIMEZONE=${TIMEZONE}
+      - CONTAINER_NAME=discourse-db-backup
+      - DB01_HOST=discourse-db
+      - DB01_TYPE=postgres
+      - DB01_NAME=${DB_NAME}
+      - DB01_USER=${DB_USER}
+      - DB01_PASS=${DB_PASS}
+      - DB01_BACKUP_INTERVAL=1440
+      - DB01_BACKUP_BEGIN=0000
+      - DB01_CLEANUP_TIME=8640
+    networks:
+      - services
+    restart: always
+
+networks:
+  services:
+    external: false
