@@ -11,12 +11,13 @@ configure_discourse
 custom_files /app/
 custom_scripts
 configure_plugins
+# configure_test_plugins
 setup_shell
 configure_notification_email
 migrate_db
 compile_assets
 create_admin_user
-# install_themes
+install_themes
 # configure_theme_permissions_and_settings
 chown discourse:discourse /app
 
