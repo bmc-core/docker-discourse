@@ -1,0 +1,8 @@
+.env
+data/
+db/
+dbbackup/
+examples/
+logs/
+plugins/
+redis/
