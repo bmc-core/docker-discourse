@@ -4,5 +4,4 @@ db/
 dbbackup/
 examples/
 logs/
-plugins/
 redis/

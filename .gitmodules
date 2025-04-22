@@ -1,0 +1,3 @@
+[submodule "plugins/discourse-gamification"]
+	path = plugins/discourse-gamification
+	url = https://github.com/discourse/discourse-gamification.git
