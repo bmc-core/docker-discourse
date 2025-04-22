@@ -6,8 +6,7 @@ services:
     #   - traefik.enable=true
     #   - traefik.http.routers.discourse.rule=Host(`${SITE_HOSTNAME}`)
     #   - traefik.http.services.discourse.loadbalancer.server.port=3000
-    # command: >
-    #   /bin/sh -c "git config --global --add safe.directory /app && /init"
+    
     volumes:
       - ./logs:/data/logs
       - ./data/uploads:/data/uploads
@@ -16,8 +15,6 @@ services:
       - ./theme.yml:/app/config/theme.yml
       - ./install/assets/functions/20-discourse:/assets/functions/20-discourse
       - ./install/etc/cont-init.d/20-discourse:/etc/cont-init.d/20-discourse
-      # - ./plugins/discourse-ai:/app/plugins/discourse-ai
-      # - ./discourse.conf:/app/config/discourse.conf
 
     environment:
       # Postgres
@@ -49,7 +46,7 @@ services:
       - SMTP_DOMAIN=jabil.com
 
       # Discourse Plugins
-      - PLUGIN_ENABLE_DISCOURSE_AI=TRUE
+      - PLUGIN_ENABLE_DISCOURSE_GAMIFICATION=TRUE
 
       # Debug
       - DEBUG_MODE=TRUE

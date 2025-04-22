@@ -577,102 +577,94 @@ install_themes() {
     print_info "===================================== Installing themes..."
     if [ -f "/app/config/theme.yml" ]; then
         cd /app
-        silent bundle exec rake themes:install < /app/config/theme.yml
-        print_debug "Themes installed from theme.yml successfully"
+        # list all themes and components
+        current_themes=$(console_exec <<EOF
+            themes = Theme.all.map { |t| { name: t.name, url: t.remote_theme&.remote_url, branch: t.remote_theme&.branch } }
+            puts themes.to_json
+EOF
+        )
+        themes_to_install=$(cat /app/config/theme.yml)
+        # check if the themes/components are already installed
+        need_install=false
+        while IFS= read -r line; do
+            if [[ $line =~ ^[A-Za-z0-9_]+: ]]; then
+                theme_name=$(echo "$line" | cut -d':' -f1 | xargs)
+                theme_url=$(echo "$themes_to_install" | grep -A2 "$theme_name:" | grep "url:" | cut -d':' -f2 | xargs)
+                theme_branch=$(echo "$themes_to_install" | grep -A2 "$theme_name:" | grep "branch:" | cut -d':' -f2 | xargs)
+                theme_info=$(echo "$current_themes" | grep -A2 "\"name\":\"$theme_name\"")
+                if [ -z "$theme_info" ] || \
+                   ! echo "$theme_info" | grep -q "\"url\":\"$theme_url\"" || \
+                   ! echo "$theme_info" | grep -q "\"branch\":\"$theme_branch\""; then
+                    need_install=true
+                    break
+                fi
+            fi
+        done <<< "$themes_to_install"
+        
+        if [ "$need_install" = true ]; then
+            print_info "===================================== New themes/components found or updates available, installing..."
+            output=$(bundle exec rake themes:install < /app/config/theme.yml 2>&1)
+            if [ $? -eq 0 ]; then
+                print_info "===================================== Themes/Components installed from theme.yml successfully"
+            else
+                print_error "===================================== Failed to install themes/components from theme.yml"
+                echo "$output"
+                exit 1
+            fi
+        else
+            print_info "===================================== All themes/components are already installed"
+        fi
     else
-        print_warn "theme.yml not found in /app/config/"
+        print_warn "===================================== theme.yml not found in /app/config/"
     fi
+    chown -R discourse:discourse /app/tmp
+    chown -R discourse:discourse /app/public/uploads/default/original
 }
 
-# configure_theme_permissions_and_settings() {
-#     print_info "Configuring theme permissions and settings..."
+configure_theme_permissions_and_settings() {
+    print_info "Configuring theme permissions and settings..."
     
-#     # Set required permissions
-#     chown -R /app/tmp/stylesheet-cache
-#     chmod -R a+w /app/public/uploads/default/original
-#     print_debug "Set Theme permissions successfully"
+    # Set required permissions
+    chown -R /app/tmp/stylesheet-cache
+    chmod -R a+w /app/public/uploads/default/original
+    print_debug "Set Theme permissions successfully"
     
-#     # Configure theme settings
-#     console_exec <<EOF
-#     begin
-#         # Check current theme
-#         puts "Checking current theme settings..."
-#         default_theme_id = SiteSetting.default_theme_id
-#         current_theme = Theme.find_by(id: default_theme_id)
-#         puts "Initial theme: #{current_theme&.name} (ID: #{default_theme_id})"
+    # Configure theme settings
+    console_exec <<EOF
+    begin
+        # Check current theme
+        puts "Checking current theme settings..."
+        default_theme_id = SiteSetting.default_theme_id
+        current_theme = Theme.find_by(id: default_theme_id)
+        puts "Initial theme: #{current_theme&.name} (ID: #{default_theme_id})"
         
-#         # Set new theme
-#         theme = Theme.find_by(name: "${THEME_NAME}")
-#         if theme
-#             SiteSetting.default_theme_id = theme.id
-#             puts "Theme set successfully to: #{theme.name} (ID: #{theme.id})"
+        # Set new theme
+        theme = Theme.find_by(name: "${THEME_NAME}")
+        if theme
+            SiteSetting.default_theme_id = theme.id
+            puts "Theme set successfully to: #{theme.name} (ID: #{theme.id})"
             
-#             # Verify the change
-#             default_theme_id = SiteSetting.default_theme_id
-#             current_theme = Theme.find_by(id: default_theme_id)
-#             puts "Verified current theme: #{current_theme&.name} (ID: #{default_theme_id})"
-#         else
-#             puts "Warning: Theme '${THEME_NAME}' not found"
-#         end
-#     rescue => e
-#         puts "Error configuring theme: #{e.message}"
-#     end
-# EOF
-# }
+            # Verify the change
+            default_theme_id = SiteSetting.default_theme_id
+            current_theme = Theme.find_by(id: default_theme_id)
+            puts "Verified current theme: #{current_theme&.name} (ID: #{default_theme_id})"
+        else
+            puts "Warning: Theme '${THEME_NAME}' not found"
+        end
+    rescue => e
+        puts "Error configuring theme: #{e.message}"
+    end
+EOF
+}
 
-# configure_test_plugins() {
-#     print_info "===================================== Configuring test plugins..."
-    
-#     # Check if the plugins directory exists
-#     if [ ! -d "/data/plugins" ]; then
-#         print_warn "Plugin directory not found: /data/plugins"
-#         return
-#     fi
-
-#     # Check if the JSON file exists
-#     if [ ! -f "/data/plugins/plugins.json" ]; then
-#         print_warn "plugins.json not found in /data/plugins/"
-#         return
-#     fi
-
-#     # Read the JSON file
-#     local plugins_json=$(cat /data/plugins/plugins.json)
-    
-#     # Use jq to parse the JSON and get the enabled plugins
-#     local enabled_plugins=$(echo "$plugins_json" | jq -r '.plugins[] | select(.enabled) | .name')
-    
-#     if [ -z "$enabled_plugins" ]; then
-#         print_warn "No enabled plugins found in plugins.json"
-#         return
-#     fi
-
-#     # Process each enabled plugin
-#     for plugin in $enabled_plugins; do
-#         # Check if the plugin directory exists in /data/plugins
-#         if [ ! -d "/data/plugins/$plugin" ]; then
-#             print_warn "Plugin directory not found: /data/plugins/$plugin"
-#             continue
-#         fi
-
-#         # Check if the plugin is already in /app/plugins
-#         if [ ! -d "/app/plugins/$plugin" ]; then
-#             print_notice "Enabling Plugin: $plugin"
-#             cp -R "/data/plugins/$plugin" "/app/plugins/$plugin"
-            
-#             # Install plugin dependencies if needed
-#             if [ -f "/app/plugins/$plugin/plugin.rb" ]; then
-#                 print_info "Installing dependencies for $plugin..."
-#                 cd "/app/plugins/$plugin"
-#                 bundle install --path gems/3.3.7 || {
-#                     print_warn "Failed to install dependencies for $plugin, continuing..."
-#                 }
-#             fi
-#         else
-#             print_debug "Plugin already exists: $plugin"
-#         fi
-#     done
-
-#     # Set the plugin directory permissions
-#     chown -R discourse:discourse /app/plugins
-#     print_info "===================================== Test plugins configuration completed"
-# }
+configure_test_plugins() {
+    print_info "===================================== Configuring test plugins..."
+    if var_true "${PLUGIN_ENABLE_DISCOURSE_GAMIFICATION}" ; then
+        plugin_installed=true
+        if [ ! -d /app/plugins/discourse-gamification ] ; then
+            print_notice "===================================== Enabling Plugin: Gamification"
+            cp -R /data/plugins/discourse-gamification /app/plugins/
+        fi
+    fi
+    chown -R discourse:discourse /app/plugins
+}
